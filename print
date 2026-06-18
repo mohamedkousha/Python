@@ -1,0 +1,25 @@
+# String containing the character's name
+pg_nome = "Myx"
+# String containing the class
+pg_classe = "Ninja"
+# Integer representing the level
+pg_livello = 5
+# Integer representing the character's hit points
+pg_hp = 10
+# Float containing the attack percentage
+pg_attacco = 2.8
+# Boolean defining whether the character has completed their quest or not
+pg_questcompletata = True
+
+# A list containing the character's inventory
+pg_inventario = ["arco", "frecce", "pozione", "mappa"]
+
+pg_inventario[1] = "scudo"
+print(pg_inventario[1])
+
+print(pg_nome)
+print(pg_classe)
+print(pg_livello)
+print(pg_hp)
+print(pg_attacco)
+print(pg_questcompletata)
