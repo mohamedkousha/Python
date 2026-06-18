@@ -1,4 +1,4 @@
-# Python
+# 🐍 Every Function – Python Documentation Branch
 
 In this branch of my GitHub portfolio, I collect, organize, and explore in depth the core functions, built‑in methods, and fundamental concepts of the Python programming language. The goal is to create a structured and comprehensive space that reflects not only my understanding of Python, but also my methodical approach to studying, documenting, and mastering the tools I use in my projects.
 
