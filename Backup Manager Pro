@@ -1,0 +1,421 @@
+# Kousha Backup Manager Pro
+# Funzioni principali:
+# - Backup file e cartelle (multipli)
+# - ZIP / 7z / RAR / TAR/GZ
+# - Backup incrementale (hash MD5)
+# - Log dettagliato + statistiche
+# - Tema chiaro/scuro personalizzato
+# - Drag & Drop
+# - Più destinazioni (HD, OneDrive, extra)
+# - Modalità compatta (mini-widget)
+
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
+from tkinter import Tk
+from PIL import Image
+import shutil
+import zipfile
+import py7zr
+import rarfile
+import tarfile
+import os
+import time
+import hashlib
+
+# ---------------- CONFIG TEMA ----------------
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+COLOR_PRIMARY = "#003B73"
+COLOR_SECONDARY = "#6EC6FF"
+COLOR_BG_LIGHT = "#E6E6E6"
+COLOR_BG_DARK = "#1A1A1A"
+
+LOG_FILE = "kousha_backup_log.txt"
+
+# ---------------- STATO ----------------
+file_sorgente = []
+cartella_sorgente = ""
+dest_hd = ""
+dest_onedrive = ""
+dest_extra = ""
+log_lines = []
+total_copied = 0
+total_size = 0
+start_time = None
+
+# ---------------- UTIL ----------------
+def add_log(msg):
+    global log_lines
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {msg}"
+    log_lines.append(line)
+    log_text.configure(state="normal")
+    log_text.delete("1.0", "end")
+    log_text.insert("end", "\n".join(log_lines))
+    log_text.configure(state="disabled")
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except:
+        pass
+
+def show_toast(message, duration=3000):
+    toast = ctk.CTkToplevel(app)
+    toast.title("")
+    toast.geometry("300x80+50+50")
+    toast.overrideredirect(True)
+    toast.configure(fg_color=COLOR_PRIMARY)
+
+    label = ctk.CTkLabel(toast, text=message, text_color="white", font=("Arial", 14))
+    label.pack(expand=True, fill="both", padx=10, pady=10)
+
+    def close_toast():
+        toast.destroy()
+
+    toast.after(duration, close_toast)
+
+def file_md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+# ---------------- TEMA ----------------
+def cambia_tema():
+    if switch_tema.get() == 1:
+        ctk.set_appearance_mode("dark")
+        app.configure(fg_color=COLOR_BG_DARK)
+    else:
+        ctk.set_appearance_mode("light")
+        app.configure(fg_color=COLOR_BG_LIGHT)
+
+# ---------------- SELEZIONE ----------------
+def scegli_file_multipli():
+    global file_sorgente
+    file_sorgente = filedialog.askopenfilenames(title="Scegli uno o più file da copiare")
+    if file_sorgente:
+        label_file.configure(text=f"{len(file_sorgente)} file selezionati")
+        add_log(f"Selezionati {len(file_sorgente)} file.")
+    else:
+        label_file.configure(text="Nessun file selezionato")
+
+def scegli_cartella_sorgente():
+    global cartella_sorgente
+    cartella_sorgente = filedialog.askdirectory(title="Scegli cartella sorgente")
+    if cartella_sorgente:
+        label_src.configure(text=f"Sorgente:\n{cartella_sorgente}")
+        add_log(f"Cartella sorgente: {cartella_sorgente}")
+    else:
+        label_src.configure(text="Nessuna cartella selezionata")
+
+def scegli_dest_hd():
+    global dest_hd
+    dest_hd = filedialog.askdirectory(title="Scegli cartella HD esterno")
+    if dest_hd:
+        label_hd.configure(text=f"HD esterno:\n{dest_hd}")
+        add_log(f"Destinazione HD: {dest_hd}")
+    else:
+        label_hd.configure(text="Nessuna cartella selezionata")
+
+def scegli_dest_onedrive():
+    global dest_onedrive
+    dest_onedrive = filedialog.askdirectory(title="Scegli cartella OneDrive")
+    if dest_onedrive:
+        label_onedrive.configure(text=f"OneDrive:\n{dest_onedrive}")
+        add_log(f"Destinazione OneDrive: {dest_onedrive}")
+    else:
+        label_onedrive.configure(text="Nessuna cartella selezionata")
+
+def scegli_dest_extra():
+    global dest_extra
+    dest_extra = filedialog.askdirectory(title="Scegli cartella extra destinazione")
+    if dest_extra:
+        label_extra.configure(text=f"Extra:\n{dest_extra}")
+        add_log(f"Destinazione extra: {dest_extra}")
+    else:
+        label_extra.configure(text="Nessuna cartella selezionata")
+
+# ---------------- ESTRAZIONE ARCHIVI ----------------
+def estrai_archivio(path):
+    ext = path.lower()
+    temp_folder = None
+
+    if ext.endswith(".zip"):
+        temp_folder = f"temp_zip_{os.path.basename(path)}"
+        os.makedirs(temp_folder, exist_ok=True)
+        with zipfile.ZipFile(path, "r") as z:
+            z.extractall(temp_folder)
+        add_log(f"Estratto ZIP: {path}")
+
+    elif ext.endswith(".7z"):
+        temp_folder = f"temp_7z_{os.path.basename(path)}"
+        os.makedirs(temp_folder, exist_ok=True)
+        with py7zr.SevenZipFile(path, mode="r") as z:
+            z.extractall(temp_folder)
+        add_log(f"Estratto 7z: {path}")
+
+    elif ext.endswith(".rar"):
+        temp_folder = f"temp_rar_{os.path.basename(path)}"
+        os.makedirs(temp_folder, exist_ok=True)
+        with rarfile.RarFile(path) as r:
+            r.extractall(temp_folder)
+        add_log(f"Estratto RAR: {path}")
+
+    elif ext.endswith(".tar") or ext.endswith(".tar.gz") or ext.endswith(".tgz"):
+        temp_folder = f"temp_tar_{os.path.basename(path)}"
+        os.makedirs(temp_folder, exist_ok=True)
+        with tarfile.open(path, "r:*") as t:
+            t.extractall(temp_folder)
+        add_log(f"Estratto TAR/GZ: {path}")
+
+    if temp_folder:
+        return temp_folder, True
+    return path, False
+
+# ---------------- COPIA FILE SINGOLO ----------------
+def copia_su_destinazioni(src_path, rel_name=None):
+    global total_copied, total_size
+
+    if rel_name is None:
+        rel_name = os.path.basename(src_path)
+
+    dests = []
+    if dest_hd:
+        dests.append(os.path.join(dest_hd, rel_name))
+    if dest_onedrive:
+        dests.append(os.path.join(dest_onedrive, rel_name))
+    if dest_extra:
+        dests.append(os.path.join(dest_extra, rel_name))
+
+    for d in dests:
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copy2(src_path, d)
+
+    size = os.path.getsize(src_path)
+    total_copied += 1
+    total_size += size
+    add_log(f"Copiato: {rel_name} ({size/1024:.1f} KB)")
+
+# ---------------- BACKUP FILE MULTIPLI ----------------
+def backup_file_multipli():
+    global start_time, total_copied, total_size
+    if not file_sorgente:
+        messagebox.showerror("Errore", "Seleziona almeno un file")
+        return
+    if not (dest_hd or dest_onedrive or dest_extra):
+        messagebox.showerror("Errore", "Seleziona almeno una destinazione")
+        return
+
+    start_time = time.time()
+    total_copied = 0
+    total_size = 0
+
+    add_log("Inizio backup file multipli...")
+    show_toast("Backup file multipli avviato")
+
+    n = len(file_sorgente)
+    for i, f in enumerate(file_sorgente, start=1):
+        path, is_temp = estrai_archivio(f)
+        if os.path.isdir(path):
+            for root, dirs, files in os.walk(path):
+                for name in files:
+                    src = os.path.join(root, name)
+                    rel = os.path.relpath(src, path)
+                    copia_su_destinazioni(src, rel)
+        else:
+            copia_su_destinazioni(path)
+
+        progress_bar.set(i / n)
+        app.update_idletasks()
+
+        if is_temp and os.path.isdir(path):
+            shutil.rmtree(path)
+
+    end_time = time.time()
+    elapsed = end_time - start_time
+    add_log(f"Backup file multipli completato. File: {total_copied}, Dimensione: {total_size/1024:.1f} KB, Tempo: {elapsed:.1f}s")
+    show_toast("Backup file multipli completato")
+    progress_bar.set(1.0)
+
+# ---------------- BACKUP CARTELLA (INCREMENTALE + HASH) ----------------
+STATE_FILE = "kousha_state.json"
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            import json
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_state(state):
+    import json
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+def backup_cartella_incrementale():
+    global start_time, total_copied, total_size
+    if not cartella_sorgente:
+        messagebox.showerror("Errore", "Seleziona una cartella sorgente")
+        return
+    if not (dest_hd or dest_onedrive or dest_extra):
+        messagebox.showerror("Errore", "Seleziona almeno una destinazione")
+        return
+
+    state = load_state()
+    if cartella_sorgente not in state:
+        state[cartella_sorgente] = {}
+
+    start_time = time.time()
+    total_copied = 0
+    total_size = 0
+
+    add_log("Inizio backup cartella (incrementale + hash)...")
+    show_toast("Backup cartella avviato")
+
+    total_files = 0
+    for root, dirs, files in os.walk(cartella_sorgente):
+        for f in files:
+            total_files += 1
+
+    processed = 0
+    for root, dirs, files in os.walk(cartella_sorgente):
+        rel_root = os.path.relpath(root, cartella_sorgente)
+        for f in files:
+            src = os.path.join(root, f)
+            rel = os.path.join(rel_root, f)
+            processed += 1
+
+            md5 = file_md5(src)
+            prev = state[cartella_sorgente].get(rel)
+
+            if prev and prev.get("md5") == md5:
+                add_log(f"Saltato (incrementale): {rel}")
+            else:
+                copia_su_destinazioni(src, rel)
+                state[cartella_sorgente][rel] = {"md5": md5}
+
+            progress_bar.set(processed / max(total_files, 1))
+            app.update_idletasks()
+
+    save_state(state)
+    end_time = time.time()
+    elapsed = end_time - start_time
+    add_log(f"Backup cartella completato. File copiati: {total_copied}, Dimensione: {total_size/1024:.1f} KB, Tempo: {elapsed:.1f}s")
+    show_toast("Backup cartella completato")
+    progress_bar.set(1.0)
+
+# ---------------- DRAG & DROP ----------------
+def enable_drag_and_drop():
+    messagebox.showinfo("Info", "Per drag & drop avanzato servirebbe integrazione con tkdnd.\nQuesta versione è predisposta ma non lo include.")
+
+# ---------------- MODALITÀ COMPATTA ----------------
+def open_compact_mode():
+    mini = ctk.CTkToplevel(app)
+    mini.title("Kousha Backup - Compatto")
+    mini.geometry("250x200")
+    mini.configure(fg_color=COLOR_PRIMARY)
+
+    ctk.CTkLabel(mini, text="Kousha Backup\nModalità compatta", text_color="white", font=("Arial", 16, "bold")).pack(pady=10)
+    ctk.CTkButton(mini, text="Backup cartella", command=backup_cartella_incrementale).pack(pady=5)
+    ctk.CTkButton(mini, text="Backup file multipli", command=backup_file_multipli).pack(pady=5)
+
+# ---------------- UI PRINCIPALE ----------------
+app = ctk.CTk()
+app.title("Kousha Backup Manager Pro")
+app.geometry("950x720")
+app.configure(fg_color=COLOR_BG_DARK)
+
+logo_img = None
+if os.path.exists("logo.png"):
+    raw = Image.open("logo.png").resize((80, 80))
+    logo_img = ctk.CTkImage(light_image=raw, dark_image=raw, size=(80, 80))
+
+header = ctk.CTkFrame(app, fg_color=COLOR_PRIMARY)
+header.pack(fill="x")
+
+if logo_img:
+    ctk.CTkLabel(header, image=logo_img, text="").pack(side="left", padx=20, pady=10)
+
+ctk.CTkLabel(
+    header,
+    text="Kousha Backup Manager Pro",
+    font=("Arial", 26, "bold"),
+    text_color="white"
+).pack(side="left", padx=10, pady=10)
+
+switch_tema = ctk.CTkSwitch(header, text="Tema Scuro / Chiaro", command=cambia_tema)
+switch_tema.pack(side="right", padx=20, pady=10)
+
+ctk.CTkButton(header, text="Modalità compatta", command=open_compact_mode).pack(side="right", padx=10, pady=10)
+
+tabview = ctk.CTkTabview(app)
+tabview.pack(expand=True, fill="both", padx=20, pady=20)
+
+tab_backup = tabview.add("Backup")
+tab_settings = tabview.add("Impostazioni")
+tab_log_tab = tabview.add("Log")
+
+# -------- TAB BACKUP --------
+tab_backup.configure(fg_color=COLOR_BG_DARK)
+
+ctk.CTkLabel(tab_backup, text="Backup file multipli", font=("Arial", 18, "bold")).pack(pady=10)
+btn_file = ctk.CTkButton(tab_backup, text="Scegli file (multipli)", command=scegli_file_multipli)
+btn_file.pack(pady=5)
+label_file = ctk.CTkLabel(tab_backup, text="Nessun file selezionato")
+label_file.pack()
+
+ctk.CTkLabel(tab_backup, text="Backup cartella (incrementale + hash)", font=("Arial", 18, "bold")).pack(pady=15)
+btn_src = ctk.CTkButton(tab_backup, text="Scegli cartella sorgente", command=scegli_cartella_sorgente)
+btn_src.pack(pady=5)
+label_src = ctk.CTkLabel(tab_backup, text="Nessuna cartella selezionata")
+label_src.pack()
+
+ctk.CTkLabel(tab_backup, text="Destinazioni", font=("Arial", 18, "bold")).pack(pady=15)
+btn_hd = ctk.CTkButton(tab_backup, text="Cartella HD esterno", command=scegli_dest_hd)
+btn_hd.pack(pady=5)
+label_hd = ctk.CTkLabel(tab_backup, text="Nessuna cartella selezionata")
+label_hd.pack()
+
+btn_onedrive = ctk.CTkButton(tab_backup, text="Cartella OneDrive", command=scegli_dest_onedrive)
+btn_onedrive.pack(pady=5)
+label_onedrive = ctk.CTkLabel(tab_backup, text="Nessuna cartella selezionata")
+label_onedrive.pack()
+
+btn_extra = ctk.CTkButton(tab_backup, text="Cartella extra destinazione", command=scegli_dest_extra)
+btn_extra.pack(pady=5)
+label_extra = ctk.CTkLabel(tab_backup, text="Nessuna cartella selezionata")
+label_extra.pack()
+
+progress_bar = ctk.CTkProgressBar(tab_backup)
+progress_bar.pack(pady=20)
+progress_bar.set(0.0)
+
+ctk.CTkButton(tab_backup, text="Avvia backup file multipli", fg_color="green", command=backup_file_multipli).pack(pady=5)
+ctk.CTkButton(tab_backup, text="Avvia backup cartella", fg_color="green", command=backup_cartella_incrementale).pack(pady=5)
+
+# -------- TAB IMPOSTAZIONI --------
+tab_settings.configure(fg_color=COLOR_BG_DARK)
+
+ctk.CTkLabel(tab_settings, text="Funzioni avanzate", font=("Arial", 18, "bold")).pack(pady=10)
+ctk.CTkButton(tab_settings, text="Drag & Drop (info)", command=enable_drag_and_drop).pack(pady=5)
+
+ctk.CTkLabel(
+    tab_settings,
+    text="Stub integrazioni cloud (Google Drive, Dropbox, FTP, ecc.)\nDa implementare con API dedicate.",
+    justify="left"
+).pack(pady=10)
+
+# -------- TAB LOG --------
+tab_log_tab.configure(fg_color=COLOR_BG_DARK)
+log_text = ctk.CTkTextbox(tab_log_tab, width=850, height=500)
+log_text.pack(pady=10, padx=10)
+log_text.configure(state="disabled")
+
+add_log("Kousha Backup Manager Pro avviato.")
+
+app.mainloop()
